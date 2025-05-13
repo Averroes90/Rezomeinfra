@@ -1,0 +1,63 @@
+
+services:
+  backend:
+    build:
+      context: ../backend          # path to the FastAPI repo
+      dockerfile: Dockerfile       # must exist in that repo
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ../backend:/app            # hot-reload in dev
+      - ../storage:/app/storage    # DOCX versions
+    env_file:
+      - ../backend/.env   
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=superSecret32Chars0123456789abcdef
+      - PUBLIC_BASE=http://backend:8000
+    depends_on:                  # ← don’t start backend until Redis is healthy
+      redis:
+        condition: service_healthy
+    networks: [ appnet ]      
+    ports:
+    - "8000:8000"   
+
+  frontend:
+    platform: linux/amd64
+    build:
+      context: ../frontend/my-vue-app           # path to the Vue repo
+      dockerfile: Dockerfile
+    command: npm run dev -- --host 0.0.0.0
+    volumes:
+      - ../frontend/my-vue-app:/app 
+      - node_modules:/app/node_modules
+    depends_on: [ backend ]
+    networks: [ appnet ]
+    ports: [ "5173:5173" ]
+
+  documentserver:
+    image: onlyoffice/documentserver:8.3.3
+    container_name: onlyoffice
+    environment:
+      - JWT_ENABLED=true
+      - JWT_SECRET=superSecret32Chars0123456789abcdef
+      - JWT_HEADER=Authorization      # DS will also accept ?token=… param
+      - JWT_IN_BODY=true   
+    depends_on: [ backend ]
+    networks: [ appnet ]
+    ports: [ "82:80" ]
+
+  redis:
+    image: redis:7
+    healthcheck:                 # ← Compose pings Redis until it answers PONG
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+    container_name: redis
+    networks: [ appnet ]
+    ports: [ "6379:6379" ]
+
+networks:
+  appnet:
+
+volumes:
+  node_modules: {}    
